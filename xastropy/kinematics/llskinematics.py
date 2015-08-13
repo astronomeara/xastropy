@@ -31,6 +31,7 @@ class LLS_Kin(object):
     vmnx: tuple (vmin,vmax)
       Velocity range for analysis
 
+    testing something using git in this line, ignore
     JXP on 11 Dec 2014, JMO Aug 12 2015
     """
 
