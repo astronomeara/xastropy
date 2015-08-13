@@ -25,10 +25,12 @@ class KOA_Vis(object):
     
     Attributes
     ----------
-    wrest: float
-      Rest wavelength of line analyzed
-    vmnx: tuple (vmin,vmax)
-      Velocity range for analysis
+    qso: string
+      Name of the quasar
+    inst: string
+      Instrument
+    zem: float
+      emission redshift
 
-    JXP on 11 Dec 2014, JMO Aug 12 2015
+    JMO Aug 13 2015
     """
