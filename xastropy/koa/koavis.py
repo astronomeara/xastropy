@@ -13,9 +13,11 @@
 from __future__ import print_function, absolute_import, division, unicode_literals
 
 import numpy as np
+import imp
 from astropy import units as u
 from astropy import constants as const
 from linetools.spectra import io as lsi
+from linetools.lists.linelist import LineList
 
 ########################## ##########################
 ########################## ##########################
@@ -85,7 +87,7 @@ class KOA_Vis(object):
         self.koa_data['zem']=zem
 
     ########################## ##########################
-    def koa_pick_redlines(self, spec, zabs)
+    def koa_pick_redlines(self, spec, zabs):
         """ Given a spectrum and an absorber redshift, pick
         those lines that are redward of lya emission
         (e.g. for easy kinematics work)
@@ -99,7 +101,7 @@ class KOA_Vis(object):
         Returns
         -------
         lines:  float array
-           list of lines to use
+           list of line rest wavelengths to use
         fills a koa_data zabs
         
         JMO Aug 13 2015
@@ -108,3 +110,10 @@ class KOA_Vis(object):
 
         #fill
         self.koa_data['zabs']=zabs
+
+        #grab some lines
+        strong=LineList('Strong',verbose=False)
+        redlines = np.where((1.0 + zabs)*strong.wrest > (1.0+self.koa_data['zem'])*1216.*u.AA)[0]
+
+        #output
+        self.lines = strong.wrest[redlines].value
