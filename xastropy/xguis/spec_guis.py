@@ -42,8 +42,10 @@ from xastropy.xutils import xdebug as xdb
 from xastropy.xguis import spec_widgets as xspw
 from xastropy.xguis import utils as xxgu
 from xastropy.igm.abs_sys.lls_utils import LLSSystem
+from xastropy.igm.abs_sys import lls_utils as xialu
 from xastropy.atomic import ionization as xatomi
 from xastropy.spec import voigt as xsv
+from xastropy.spec import continuum as xspc
 
 xa_path = imp.find_module('xastropy')[1]
 
@@ -481,18 +483,18 @@ class XAODMGui(QtGui.QDialog):
 # GUI for fitting LLS in a spectrum
 class XFitLLSGUI(QtGui.QMainWindow):
     ''' GUI to fit LLS in a given spectrum
-        v0.3
+        v0.5.0
         30-Jul-2015 by JXP
     '''
     def __init__(self, ispec, parent=None, lls_fit_file=None, 
-        srch_id=True, outfil=None, smooth=3., zqso=None):
+        outfil=None, smooth=3., zqso=None): 
         QtGui.QMainWindow.__init__(self, parent)
         '''
-        spec = Spectrum1D
+        ispec = Spectrum1D or specfil
         lls_fit_file: str, optional
           Name of the LLS fit file to input
         smooth: float, optional
-          Number of pixels to smooth on
+          Number of pixels to smooth on (FWHM)
         zqso: float, optional
           Redshift of the quasar.  If input, a Telfer continuum is used
         '''
@@ -511,22 +513,27 @@ class XFitLLSGUI(QtGui.QMainWindow):
         self.count_lls = 0
         self.lls_model = None
         self.all_forest = []
+        self.flag_write = False
+
         # Spectrum
         spec, spec_fil = xxgu.read_spec(ispec)
 
         # Continuum
-        self.conti_dict = {'Norm': np.median(spec.flux), 'tilt': 0.,
-            'piv_wv': np.median(spec.dispersion.value)}
+        self.conti_dict = xspc.init_conti_dict(
+            Norm=float(np.median(spec.flux.value)),
+            piv_wv=np.median(spec.dispersion.value),
+            igm='True')
         if zqso is not None:
-            # Read Telfer 
-            telfer = ascii.read(
-                xa_path+'/data/quasar/telfer_hst_comp01_rq.ascii', comment='#')
-            scale = telfer['flux'][(telfer['wrest'] == 1450.)]
-            tspec = XSpectrum1D.from_tuple((telfer['wrest']*(1+zqso),
-                telfer['flux']/scale[0])) # Observer frame
+            self.zqso = zqso
+            # Read Telfer and apply IGM
+            tspec = xspc.get_telfer_spec(zqso=zqso,
+                igm=(self.conti_dict['igm']=='True'))
             # Rebin
             self.continuum = tspec.rebin(spec.dispersion)
+            # Reset pivot wave
+            self.conti_dict['piv_wv'] = 1025.*(1+zqso)
         else:
+            self.zqso = None
             self.continuum = XSpectrum1D.from_tuple((
                 spec.dispersion,np.ones(len(spec.dispersion))))
         self.base_continuum = self.continuum.flux
@@ -540,11 +547,14 @@ class XFitLLSGUI(QtGui.QMainWindow):
         # LineList
         self.llist = xxgu.set_llist('Strong') 
         self.llist['z'] = 0.
+        self.plt_wv = zip(np.array([911.7,972.5367,1025.7222,1215.6700])*u.AA,
+            ['LL','Lyg','Lyb','Lya'])
 
         # z and N boxes
         self.zwidget = xxgu.EditBox(-1., 'z_LLS=', '{:0.5f}')
         self.Nwidget = xxgu.EditBox(-1., 'NHI=', '{:0.2f}')
         self.bwidget = xxgu.EditBox(-1., 'b=', '{:0.1f}')
+        self.Cwidget = xxgu.EditBox('None', 'Comment=', '{:s}')
 
         # Grab the pieces and tie together
         self.abssys_widg = xspw.AbsSysWidget([],only_one=True,
@@ -553,6 +563,10 @@ class XFitLLSGUI(QtGui.QMainWindow):
                                                 llist=self.llist, key_events=False,
                                                 abs_sys=self.abssys_widg.abs_sys)
         self.spec_widg.continuum = self.continuum
+
+        #if other_spec is not None:
+        #    ospec, ospec_fil = xxgu.read_spec(other_spec)
+        #    self.spec_widg.other_spec = ospec
 
         # Initial file
         if lls_fit_file is not None:
@@ -585,6 +599,8 @@ class XFitLLSGUI(QtGui.QMainWindow):
             QtCore.SIGNAL('editingFinished ()'), self.setbzN)
         self.connect(self.bwidget.box, 
             QtCore.SIGNAL('editingFinished ()'), self.setbzN)
+        self.connect(self.Cwidget.box, 
+            QtCore.SIGNAL('editingFinished ()'), self.setbzN)
 
         # Layout
         anly_widg = QtGui.QWidget()
@@ -609,6 +625,7 @@ class XFitLLSGUI(QtGui.QMainWindow):
 
         vbox = QtGui.QVBoxLayout()
         vbox.addWidget(zNwidg)
+        vbox.addWidget(self.Cwidget)
         vbox.addWidget(self.abssys_widg)
         vbox.addWidget(buttons)
         anly_widg.setLayout(vbox)
@@ -626,7 +643,7 @@ class XFitLLSGUI(QtGui.QMainWindow):
         self.update_boxes()
 
     def create_status_bar(self):
-        self.status_text = QtGui.QLabel("XFitLLS")
+        self.status_text = QtGui.QLabel("XFitLLS v0.4.2")
         self.statusBar().addWidget(self.status_text, 1)
 
     def setbzN(self):
@@ -641,6 +658,8 @@ class XFitLLSGUI(QtGui.QMainWindow):
             float(self.zwidget.box.text()))
         self.abssys_widg.all_abssys[idx].bval = (
             float(self.bwidget.box.text()))*u.km/u.s
+        self.abssys_widg.all_abssys[idx].comment = (
+            self.Cwidget.box.text())
         # Update the lines
         for iline in self.abssys_widg.all_abssys[idx].lls_lines:
             iline.attrib['z'] = self.abssys_widg.all_abssys[idx].zabs 
@@ -667,6 +686,10 @@ class XFitLLSGUI(QtGui.QMainWindow):
         self.bwidget.box.setText(
             self.bwidget.box.frmt.format(
                 self.abssys_widg.all_abssys[idx].bval.value)) 
+        # Comment
+        self.Cwidget.box.setText(
+            self.Cwidget.box.frmt.format(
+                self.abssys_widg.all_abssys[idx].comment))
 
     def update_conti(self):
         '''Update continuum '''
@@ -683,26 +706,9 @@ class XFitLLSGUI(QtGui.QMainWindow):
             self.spec_widg.model = None
             return
         #
-        all_tau_model = np.zeros(len(self.full_model.flux))
-        # Loop on LLS
-        for lls in self.abssys_widg.all_abssys:
-            # LL
-            wv_rest = self.full_model.dispersion / (lls.zabs+1)
-            energy = wv_rest.to(u.eV, equivalencies=u.spectral())
-            # Get photo_cross and calculate tau
-            tau_LL = (10.**lls.NHI / u.cm**2) * xatomi.photo_cross(1,1,energy)
+        all_tau_model = xialu.tau_multi_lls(self.full_model.dispersion,
+            self.abssys_widg.all_abssys)
 
-            # Lyman
-            tau_Lyman = xsv.voigt_model(self.full_model.dispersion, 
-                lls.lls_lines, flg_ret=2)
-            tau_model = tau_LL + tau_Lyman
-
-            # Kludge around the limit
-            pix_LL = np.argmin( np.fabs( wv_rest- 911.3*u.AA ) )
-            pix_kludge = np.where( (wv_rest > 911.5*u.AA) & (wv_rest < 912.8*u.AA) )[0]
-            tau_model[pix_kludge] = tau_model[pix_LL]
-            # Add
-            all_tau_model += tau_model
         # Loop on forest lines
         for forest in self.all_forest:
             tau_Lyman = xsv.voigt_model(self.full_model.dispersion, 
@@ -741,7 +747,9 @@ class XFitLLSGUI(QtGui.QMainWindow):
             if event.key == 'C':
                 imin = np.argmin(np.abs(
                     self.continuum.dispersion.value-event.xdata))
-                self.conti_dict['Norm'] = event.ydata / self.base_continuum[imin]
+                self.conti_dict['Norm'] = float(event.ydata / 
+                    (self.base_continuum[imin].value*(event.xdata/
+                        self.conti_dict['piv_wv'])**self.conti_dict['tilt']))
             elif event.key == '1':
                 self.conti_dict['tilt'] += 0.1
             elif event.key == '2':
@@ -754,7 +762,7 @@ class XFitLLSGUI(QtGui.QMainWindow):
             # Update
             self.llist['Plot'] = False # Turn off metal-lines
             self.update_model()
-        elif event.key in ['L','a','N','n','v','V','D','@']: # LLS-centric
+        elif event.key in ['L','a','N','n','v','V','D','@','g']: # LLS-centric
             idx = self.get_sngl_sel_sys()
             if idx is None:
                 return
@@ -762,6 +770,8 @@ class XFitLLSGUI(QtGui.QMainWindow):
                 self.abssys_widg.all_abssys[idx].zabs = event.xdata/911.7633 - 1.
             elif event.key == 'a': #Lya
                 self.abssys_widg.all_abssys[idx].zabs = event.xdata/1215.6700-1.
+            elif event.key == 'g': #Lyg
+                self.abssys_widg.all_abssys[idx].zabs = event.xdata/972.5367-1.
             elif event.key == 'N': #Add to NHI
                 self.abssys_widg.all_abssys[idx].NHI += 0.05
             elif event.key == 'n': #Subtract from NHI
@@ -805,15 +815,14 @@ class XFitLLSGUI(QtGui.QMainWindow):
         for kk,lls in enumerate(self.abssys_widg.all_abssys):
             # Label
             ipos = self.abssys_widg.all_items[kk].rfind('_')
-            lbl = self.abssys_widg.all_items[kk][ipos+1:]
+            ilbl = self.abssys_widg.all_items[kk][ipos+1:]
             # Add text
-            wvLLS = (1+lls.zabs)*911.7
-            wvLya = (1+lls.zabs)*1215.6700
-            idx = np.argmin(np.abs(self.continuum.dispersion-wvLLS*u.AA))
-            self.spec_widg.ax.text(wvLLS, self.continuum.flux[idx],
-                '{:s}'.format(lbl), ha='center', color='blue', size='small')
-            self.spec_widg.ax.text(wvLya, self.continuum.flux[idx],
-                '{:s}'.format(lbl), ha='center', color='blue', size='small')
+            for wv,lbl in self.plt_wv:
+                idx = np.argmin(np.abs(self.continuum.dispersion-wv*(1+lls.zabs)))
+                self.spec_widg.ax.text(wv.value*(1+lls.zabs), 
+                    self.continuum.flux[idx],
+                    '{:s}_{:s}'.format(ilbl,lbl), ha='center', 
+                    color='blue', size='small', rotation=90.)
         # Draw
         self.spec_widg.canvas.draw()
 
@@ -838,13 +847,14 @@ class XFitLLSGUI(QtGui.QMainWindow):
         # Append to forest lines
         self.all_forest.append(forest)
 
-    def add_LLS(self,z,NHI=17.3,bval=20.*u.km/u.s):
+    def add_LLS(self,z,NHI=17.3,bval=20.*u.km/u.s,comment='None'):
         '''Generate a new LLS
         '''
         #
         new_sys = LLSSystem(NHI=NHI)
         new_sys.zabs = z
         new_sys.bval = bval # This is not standard, but for convenience
+        new_sys.comment = comment
         new_sys.fill_lls_lines(bval=bval)
         # Name
         self.count_lls += 1
@@ -887,7 +897,8 @@ class XFitLLSGUI(QtGui.QMainWindow):
             #QtCore.pyqtRestoreInputHook()
             self.add_LLS(lls_dict['LLS'][key]['z'],
                 NHI=lls_dict['LLS'][key]['NHI'],
-                bval=lls_dict['LLS'][key]['bval']*u.km/u.s)
+                bval=lls_dict['LLS'][key]['bval']*u.km/u.s,
+                comment=lls_dict['LLS'][key]['comment'])
         self.smooth = lls_dict['smooth']
         # Updates
         self.update_boxes()
@@ -899,6 +910,8 @@ class XFitLLSGUI(QtGui.QMainWindow):
         # Create dict
         out_dict = dict(LLS={},conti=self.conti_dict,
             spec_file=self.spec_widg.spec.filename,smooth=self.smooth)
+        if self.zqso is not None:
+            out_dict['zqso'] = self.zqso
         # Load
         for kk,lls in enumerate(self.abssys_widg.all_abssys):
             key = '{:d}'.format(kk+1)
@@ -906,10 +919,15 @@ class XFitLLSGUI(QtGui.QMainWindow):
             out_dict['LLS'][key]['z'] = lls.zabs
             out_dict['LLS'][key]['NHI'] = lls.NHI
             out_dict['LLS'][key]['bval'] = lls.lls_lines[0].attrib['b'].value
+            out_dict['LLS'][key]['comment'] = str(lls.comment).strip()
         # Write
+        #QtCore.pyqtRemoveInputHook()
+        #xdb.set_trace()
+        #QtCore.pyqtRestoreInputHook()
         with io.open(self.outfil, 'w', encoding='utf-8') as f:
             f.write(unicode(json.dumps(out_dict, sort_keys=True, indent=4, 
                 separators=(',', ': '))))
+        self.flag_write = True
 
     # Write + Quit
     def write_quit(self):
