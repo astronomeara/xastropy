@@ -74,7 +74,7 @@ def voigt_model(wave, line, fwhm=0., flg_ret=1, debug=False):
       Observed wavelengths
     line: AbsLine, List of Absline, or array of parameters
     fwhm: float, optional
-      FWHM for Gaussian smoothing
+      FWHM for Gaussian smoothing (pixels)
     flg_ret : int (1)  Byte-wise Flag for return
       1: vmodel [XSpectrum1D]
       2: tau
@@ -126,7 +126,8 @@ def voigt_model(wave, line, fwhm=0., flg_ret=1, debug=False):
         nujk = (const.c / wv).to(u.Hz)
         dnu = (par[2].to(u.km/u.s) / wv).to('Hz')
         if par[5].value == 0.:
-            warnings.warn('Gamma value is probably not set for wrest={:g}!'.format(par[3]))
+            warnings.warn('Gamma value is probably not set for wrest={:g} {}!'
+            	.format(float(par[3].value),par[3].unit))
         avoigt = (par[5]/( 4 * np.pi * dnu)).to(u.dimensionless_unscaled)
 
         uvoigt = ( ((const.c / (wave/zp1)) - nujk) / dnu).to(u.dimensionless_unscaled)
@@ -144,8 +145,15 @@ def voigt_model(wave, line, fwhm=0., flg_ret=1, debug=False):
 
         # Voigt
         cne = 0.014971475 * cold * par[4] * u.cm * u.cm * u.Hz
-        tau = cne * voigtking(uvoigt,avoigt) / dnu #(np.sqrt(np.pi) * dnu)
-        tau = tau.value # Should be dimenstionaless
+        try:
+            tau = cne * voigtking(uvoigt,avoigt) / dnu #(np.sqrt(np.pi) * dnu)
+        except IndexError:
+            pass
+            #from PyQt4 import QtCore
+            #QtCore.pyqtRemoveInputHook()
+            #xdb.set_trace()
+            #QtCore.pyqtRestoreInputHook()
+        tau = tau.value # Should be dimensionless
 
     # Only tau?
     if flg_ret == 2:
