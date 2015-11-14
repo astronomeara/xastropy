@@ -38,6 +38,7 @@ from linetools.spectra.xspectrum1d import XSpectrum1D
 from linetools.spectra import convolve as lsc
 import linetools.spectra.io as lsi
 from linetools.spectralline import AbsLine
+from linetools.analysis import voigt as lav
 
 from xastropy.xutils import xdebug as xdb
 from xastropy.xguis import spec_widgets as xspw
@@ -45,7 +46,6 @@ from xastropy.xguis import utils as xxgu
 from xastropy.igm.abs_sys.lls_utils import LLSSystem
 from xastropy.igm.abs_sys import lls_utils as xialu
 from xastropy.atomic import ionization as xatomi
-from xastropy.spec import voigt as xsv
 from xastropy.spec import continuum as xspc
 
 xa_path = imp.find_module('xastropy')[1]
@@ -89,21 +89,28 @@ class XFitLLSGUI(QtGui.QMainWindow):
         30-Jul-2015 by JXP
     '''
     def __init__(self, ispec, parent=None, lls_fit_file=None, 
-        outfil=None, smooth=3., zqso=None, fN_gamma=None, template=None): 
+        outfil=None, smooth=3., zqso=None, fN_gamma=None, template=None,
+        dw=0.1, skip_wveval=False):
         QtGui.QMainWindow.__init__(self, parent)
         '''
-        ispec = Spectrum1D or specfil
+        ispec : Spectrum1D or specfil
         lls_fit_file: str, optional
           Name of the LLS fit file to input
-        smooth: float, optional
+        smooth : float, optional
           Number of pixels to smooth on (FWHM)
-        zqso: float, optional
+        zqso : float, optional
           Redshift of the quasar.  If input, a Telfer continuum is used
-        fN_gamma: float, optional
+        fN_gamma : float, optional
           Redshift evolution of f(N) or IGM fiddled continuum
-        template: str, optional
+        template : str, optional
           Filename of a QSO template to use instead of the Telfer
           continuum. Only used if zqso is also given.
+        dw : float, optional
+          Pixel width in Angstroms for the wavelength array used to
+          generate optical depths. Default is 0.1.
+        skip_wveval : bool, optional
+          Skip rebinning of wavelengths in the Voigt profile generation.
+          This can speed up the code considerably, but use it wisely.
         '''
 
         # Build a widget combining several others
@@ -123,6 +130,11 @@ class XFitLLSGUI(QtGui.QMainWindow):
         self.base_continuum = None
         self.all_forest = []
         self.flag_write = False
+        self.dw = float(dw)
+        self.skip_wveval = skip_wveval
+        if skip_wveval:
+            warnings.warn("Skipping wavelength rebinning in Voigt.")
+            warnings.warn("Make sure you know what you are doing!")
 
         # Spectrum
         spec, spec_fil = xxgu.read_spec(ispec)
@@ -324,20 +336,30 @@ class XFitLLSGUI(QtGui.QMainWindow):
             self.lls_model = None
             self.spec_widg.model = None
             return
-        #
-        all_tau_model = xialu.tau_multi_lls(self.full_model.dispersion,
-            self.abssys_widg.all_abssys)
+        # use finer wavelength array to resolve absorption features.
+        wa = self.full_model.dispersion
+        # Angstroms
+        # should really make this a constant velocity width array instead.
+        if not self.skip_wveval:
+            wa1 = np.arange(wa[0].value, wa[-1].value, self.dw) * wa.unit
+        else:
+            wa1 = wa
+        all_tau_model = xialu.tau_multi_lls(wa1,
+            self.abssys_widg.all_abssys, skip_wveval=self.skip_wveval)
 
         # Loop on forest lines
         for forest in self.all_forest:
-            tau_Lyman = xsv.voigt_model(self.full_model.dispersion, 
-                forest.lines, flg_ret=2)
+            tau_Lyman = lav.voigt_from_abslines(wa1, forest.lines, 
+                ret='tau', skip_wveval=self.skip_wveval)
             all_tau_model += tau_Lyman
 
         # Flux and smooth
         flux = np.exp(-1. * all_tau_model)
         if self.smooth > 0:
-            self.lls_model = lsc.convolve_psf(flux, self.smooth)
+            mult = np.median(np.diff(wa.value)) / self.dw
+            flux = lsc.convolve_psf(flux, self.smooth * mult)
+        if not self.skip_wveval:
+            self.lls_model = np.interp(wa.value, wa1.value, flux)
         else:
             self.lls_model = flux
 
@@ -568,13 +590,18 @@ class XFitLLSGUI(QtGui.QMainWindow):
                         (spec.dispersion<(1+zmin)*1026.*u.AA))[0] # Might go to Lyb
         nroll = (np.argmin(np.abs(spec.dispersion-(911.7*u.AA*(1+zmin))))- # Extra 0.01 for bad z
                    np.argmin(np.abs(spec.dispersion-(911.7*u.AA*(1+plls.zabs)))))
+        # Require nroll does not exceed length of spectrum
+        if np.max(apix)+nroll > len(spec.dispersion):
+            nroll = len(spec.dispersion) - np.max(apix) - 1
         gdpix = np.arange(np.min(apix)-nroll,np.max(apix)+nroll+1)
-        #print(len(apix), nroll)
         roll_flux = np.concatenate([np.ones(nroll),lls_flux[apix], np.ones(nroll)])
         roll_msk = roll_flux < 0.7
 
         # Generate data arrays
         wave_pad = spec.dispersion[gdpix]
+            #QtCore.pyqtRemoveInputHook()
+            #xdb.set_trace()
+            #QtCore.pyqtRestoreInputHook()
         flux_pad = spec.flux[gdpix]
         sig_pad = spec.sig[gdpix]
         if len(self.abssys_widg.all_abssys) > 0:
