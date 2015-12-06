@@ -15,36 +15,21 @@ from __future__ import print_function, absolute_import, division, unicode_litera
 
 # Import libraries
 import numpy as np
-import os, sys, warnings, imp
-import matplotlib.pyplot as plt
+import imp
 import glob
 
 from PyQt4 import QtGui
 from PyQt4 import QtCore
 
-from matplotlib import mpl
-from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
-# Matplotlib Figure object
-from matplotlib.figure import Figure
+from matplotlib import rcParams
 
 from astropy.units import Quantity
-from astropy.nddata import StdDevUncertainty
 from astropy import units as u
-from astropy.io import fits, ascii
 
-from linetools.lists.linelist import LineList
-from linetools.spectra.xspectrum1d import XSpectrum1D
-from linetools.spectra import convolve as lsc
-from linetools.spectralline import AbsLine
 
 from xastropy.xutils import xdebug as xdb
 from xastropy.xguis import spec_widgets as xspw
 from xastropy.xguis import utils as xxgu
-from xastropy.igm.abs_sys.lls_utils import LLSSystem
-from xastropy.igm.abs_sys import lls_utils as xialu
-from xastropy.atomic import ionization as xatomi
-from xastropy.spec import continuum as xspc
 
 xa_path = imp.find_module('xastropy')[1]
 
@@ -74,7 +59,7 @@ class XSpecGui(QtGui.QMainWindow):
         spec,_ = xxgu.read_spec(ispec)
 
         # 
-        mpl.rcParams['agg.path.chunksize'] = 20000 # Needed to avoid carsh in large spectral files
+        rcParams['agg.path.chunksize'] = 20000 # Needed to avoid crash in large spectral files
         
         # Build a widget combining several others
         self.main_widget = QtGui.QWidget()
