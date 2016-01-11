@@ -12,7 +12,7 @@
 
 # Import libraries
 import numpy as np
-from astropy.table import QTable, Column
+from astropy.table import QTable, Column, Table
 from astropy.coordinates import SkyCoord
 from astropy import units as u
 from astropy.units import Quantity
@@ -85,7 +85,7 @@ def dtos1(irad, fmt=0):
     ----------
     rad: tuple (RA, DEC in decimal degrees [with units!]) or SkyCoord
     fmt: int (0)
-      0: colon deliminated, e.g. '11:23:21.23', '+23:11:45.0'
+      0: colon delimitered, e.g. '11:23:21.23', '+23:11:45.0'
       1: J name, e.g. 'J112321.23+231145.0'
     '''
     # Get to SkyCoord
@@ -114,14 +114,14 @@ def dtos1(irad, fmt=0):
 #### ###############################
 #  Add RA, DEC to a Table
 def stod_table(table):
-    ''' Converts RAS, DECS columns in a Table to RA, DEC
+    ''' Converts RAS, DECS columns in a QTable to RA, DEC
 
     Parameters
     ----------
     table:  QTable (needs to handle units)
     '''
 
-    if type(table) is not QTable:
+    if not isinstance(table,QTable):
         raise TypeError('radec.stod_table: table needs to be a QTable')
 
     # Generate Columns (as needed)
@@ -152,8 +152,17 @@ def stod(in_rads, radec=None):
 #### ###############################
 #  Main conversion
 def to_coord(irad):
-    """
-    Input RA/DEC as a tuple, str or SkyCoord and return a SkyCoord
+    """Input RA/DEC as a tuple, str or SkyCoord and return a SkyCoord
+    Parameters:
+    --------------
+    irad: tuple, str, or SkyCoord
+      Input RA/DEC
+      tuple: (float,float), (deg,deg), or (str,str)
+        e.g.  (213.221,45.222), (213.221*u.deg,45.222*u.deg), 
+          ('00:23:23.1','-23:11:02.3')
+    Returns:
+    ---------
+    SkyCoord object of that RA/DEC
     """
     # SkyCoord
     if type(irad) is SkyCoord:
@@ -166,7 +175,7 @@ def to_coord(irad):
             raise TypeError('radec.to_coord: Requires length two (RA,DEC)')
 
     # String?
-    if type(irad[0]) in [str,unicode]:
+    if isinstance(irad[0],basestring):
         rad = stod1(irad)
     elif type(irad[0]) is Quantity:
         rad = irad 
@@ -179,7 +188,7 @@ def to_coord(irad):
 
 #### ###############################
 #  Offsets
-def offsets(irad1, irad2):
+def offsets(irad1, irad2, verbose=True):
     """
     Input a pair of RA/DEC and calculate the RA/DEC offsets between them
 
@@ -187,6 +196,7 @@ def offsets(irad1, irad2):
     ----------
     irad1 : RA/DEC of source 1 (origin)
     irad2 : RA/DEC of source 2 (destination)
+    verbose: bool, optional
 
     Returns:
     -------
@@ -205,12 +215,13 @@ def offsets(irad1, irad2):
 
     # RA/DEC
     dec_off = np.cos(PA) * sep # arcsec
-    ra_off = np.sin(PA) * sep # arcsec
+    ra_off = np.sin(PA) * sep # arcsec (East is *higher* RA)
 
     # Print
-    print('RA Offset from 1 to 2 is {:g}'.format(ra_off))
-    print('DEC Offset from 1 to 2 is {:g}'.format(dec_off))
-    print('PA = {:g}'.format(PA.degree*u.degree))
+    if verbose:
+        print('RA Offset from 1 to 2 is {:g}'.format(ra_off))
+        print('DEC Offset from 1 to 2 is {:g}'.format(dec_off))
+        print('PA = {:g}'.format(PA.degree*u.degree))
 
     # Return
     return (ra_off, dec_off), PA.degree * u.degree

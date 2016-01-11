@@ -23,7 +23,6 @@ from astropy import constants as const
 
 
 from xastropy.xutils import xdebug as xdb
-from xastropy.spec import abs_line, voigt
 from xastropy.stats import mcmc
 from xastropy.igm import igm_utils as igmu
 from xastropy.atomic import ionization as xai
@@ -32,7 +31,7 @@ from xastropy.atomic import ionization as xai
 xa_path = imp.find_module('xastropy')[1]
 
 class fN_Model(object):
-    """A Class for fN models
+    """A Class for f(N,X) models
 
     Attributes:
        fN_mtype: string
@@ -49,7 +48,7 @@ class fN_Model(object):
        zpivot: float (2.4)
           Pivot for redshift evolution
        gamma: float (1.5)
-          Power law for dN/dX
+          Power law for dN/dX, not dN/dz
     """
 
     # Initialize with type
@@ -66,8 +65,10 @@ class fN_Model(object):
         self.zmnx = zmnx  
 
         # Pivots
-        if pivots == None: self.pivots = np.zeros(2)
-        else: self.pivots = pivots
+        if pivots is None: 
+            self.pivots = np.zeros(2)
+        else: 
+            self.pivots = pivots
         self.npivot = len(pivots)
 
         # Param
@@ -80,7 +81,9 @@ class fN_Model(object):
             #    self.param = np.append(self.param,-30.)
             # Init
             if fN_mtype == 'Hspline':
-                self.model = scii.PchipInterpolator(self.pivots, self.param)
+                self.model = scii.PchipInterpolator(self.pivots, self.param,
+                    extrapolate=True) # scipy 0.16
+                #xdb.set_trace()
 
         # Redshift (needs updating)
         self.zpivot = zpivot
@@ -141,7 +144,7 @@ class fN_Model(object):
             z = np.array([z])
 
         # Brute force (should be good to ~0.5%)
-        lgNHI = NHI_min + (NHI_max-NHI_min)*np.arange(neval)/(neval-1.)
+        lgNHI = np.linspace(NHI_min,NHI_max,neval)#NHI_min + (NHI_max-NHI_min)*np.arange(neval)/(neval-1.)
         dlgN = lgNHI[1]-lgNHI[0]
 
         # Evaluate f(N,X)
@@ -247,7 +250,7 @@ class fN_Model(object):
     ##
     # Evaluate
     def eval(self, NHI, z, vel_array=None, cosmo=None):
-        """ Evaluate the model at a set of NHI values
+        """ Evaluate the f(N,X) model at a set of NHI values
 
         Parameters:
         NHI: array
@@ -519,11 +522,11 @@ def default_model(recalc=False, pckl_fil=None, use_mcmc=False, write=False):
       Tested against XIDL code by JXP on 09 Nov 2014
 
     Parameters:
-    recalc: boolean (False)
+    recalc : boolean (False)
       Recalucate the default model
-    use_mcmc: boolean (False)
+    use_mcmc : boolean (False)
       Use the MCMC chain to generate the model
-    write: boolean (False)
+    write : boolean (False)
       Write out the model
     """
     if pckl_fil==None:
@@ -583,7 +586,8 @@ if __name__ == '__main__':
     #flg_test += 2**2 # Data
     #flg_test += 2**3 # l(X)
     #flg_test += 64 # Akio
-    flg_test += 2**7 # rho_HI
+    #flg_test += 2**7 # rho_HI
+    flg_test += 2**8 # Create Pickle file
     #flg_test = 0 + 64
     
     if (flg_test % 2) == 1:
@@ -599,7 +603,7 @@ if __name__ == '__main__':
         print(fN_model)
 
     # Compare default against P+13
-    if (flg_test % 4) >= 2:
+    if (flg_test % 2**2) >= 2**1:
         fN_model = xifm.default_model()
         p13_file = (os.environ.get('DROPBOX_DIR')+'IGM/fN/fN_spline_z24.fits.gz')
         hdu = fits.open(p13_file)
@@ -678,3 +682,7 @@ if __name__ == '__main__':
         # Evaluate
         rho_HI = fN_model.calc_rhoHI(z, (20.3, 22.))
         print('rho_HI = {:g}'.format(rho_HI))
+
+    # Generate pickle file
+    if (flg_test % 2**9) >= 2**8:
+        fN_model = xifm.default_model(recalc=True,write=True)
